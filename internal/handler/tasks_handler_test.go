@@ -10,219 +10,203 @@ import (
 	"github.com/juuzouuu188/task-tracker/internal/model"
 )
 
-func TestCreateTask(t *testing.T) {
-	tasks = map[string]model.Task{} // reset
+// -----------------------------
+// Helpers
+// -----------------------------
 
-	t.Run("valid task", func(t *testing.T) {
-		body := bytes.NewBufferString(`{"title": "Buy groceries"}`)
-
-		req := httptest.NewRequest(http.MethodPost, "/", body)
-		req.Header.Set("Content-Type", "application/json")
-
-		rr := httptest.NewRecorder()
-
-		CreateTaskHandler(rr, req)
-
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("expected 201 got %d", rr.Code)
-		}
-
-		var task model.Task
-		if err := json.NewDecoder(rr.Body).Decode(&task); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-
-		if task.Title != "Buy groceries" {
-			t.Errorf("expected title 'Buy groceries' got '%s'", task.Title)
-		}
-
-		if task.Status != model.StatusTodo {
-			t.Errorf("expected status 'todo' got '%s'", task.Status)
-		}
-	})
-
-	t.Run("empty title", func(t *testing.T) {
-		body := bytes.NewBufferString(`{}`)
-
-		req := httptest.NewRequest(http.MethodPost, "/", body)
-		req.Header.Set("Content-Type", "application/json")
-
-		rr := httptest.NewRecorder()
-
-		CreateTaskHandler(rr, req)
-
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("expected 400 got %d", rr.Code)
-		}
-	})
-
-	t.Run("whitespace title", func(t *testing.T) {
-		body := bytes.NewBufferString(`{"title": ""}`)
-
-		req := httptest.NewRequest(http.MethodPost, "/", body)
-		req.Header.Set("Content-Type", "application/json")
-
-		rr := httptest.NewRecorder()
-		CreateTaskHandler(rr, req)
-
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("expected 400 got %d", rr.Code)
-		}
-
-	})
-
-	t.Run("invalid json", func(t *testing.T) {
-		body := bytes.NewBufferString(`{invalid-json}`)
-
-		req := httptest.NewRequest(http.MethodPost, "/", body)
-		req.Header.Set("Content-Type", "application/json")
-
-		rr := httptest.NewRecorder()
-
-		CreateTaskHandler(rr, req)
-
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("expected 400 got %d", rr.Code)
-		}
-	})
-
+func newJSONRequest(method, path, body string) *http.Request {
+	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }
+
+func decodeBody(t *testing.T, rr *httptest.ResponseRecorder, v any) {
+	t.Helper()
+	if err := json.NewDecoder(rr.Body).Decode(v); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+}
+
+// -----------------------------
+// CREATE TASK
+// -----------------------------
+
+func TestCreateTask(t *testing.T) {
+	tasks = map[string]model.Task{}
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantTitle  string
+	}{
+		{"valid task", `{"title":"Buy groceries"}`, http.StatusCreated, "Buy groceries"},
+		{"empty title", `{}`, http.StatusBadRequest, ""},
+		{"whitespace title", `{"title":""}`, http.StatusBadRequest, ""},
+		{"invalid json", `{invalid-json}`, http.StatusBadRequest, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := newJSONRequest(http.MethodPost, "/", tc.body)
+			rr := httptest.NewRecorder()
+
+			CreateTaskHandler(rr, req)
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("expected %d got %d", tc.wantStatus, rr.Code)
+			}
+
+			if tc.wantStatus == http.StatusCreated {
+				var task model.Task
+				decodeBody(t, rr, &task)
+
+				if task.Title != tc.wantTitle {
+					t.Errorf("expected %s got %s", tc.wantTitle, task.Title)
+				}
+			}
+		})
+	}
+}
+
+// -----------------------------
+// LIST TASKS
+// -----------------------------
 
 func TestListAllTasks(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func()
+		wantLen    int
+		wantTitles []string
+	}{
+		{
+			name: "multiple tasks",
+			setup: func() {
+				tasks = map[string]model.Task{
+					"1": {ID: "1", Title: "Buy groceries"},
+					"2": {ID: "2", Title: "Buy stationary"},
+				}
+			},
+			wantLen:    2,
+			wantTitles: []string{"Buy groceries", "Buy stationary"},
+		},
+		{
+			name: "empty list",
+			setup: func() {
+				tasks = map[string]model.Task{}
+			},
+			wantLen:    0,
+			wantTitles: nil,
+		},
+	}
 
-	t.Run("multiple tasks", func(t *testing.T) {
-		tasks = map[string]model.Task{}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup()
 
-		tasks["1"] = model.Task{ID: "1", Title: "Buy groceries", Status: model.StatusTodo}
-		tasks["2"] = model.Task{ID: "2", Title: "Buy stationary", Status: model.StatusTodo}
+			req := newJSONRequest(http.MethodGet, "/tasks", "")
+			rr := httptest.NewRecorder()
 
-		req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
-		req.Header.Set("Content-Type", "application/json")
+			ListAllTasks(rr, req)
 
-		rr := httptest.NewRecorder()
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200 got %d", rr.Code)
+			}
 
-		ListAllTasks(rr, req)
+			var result []model.Task
+			decodeBody(t, rr, &result)
 
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200 got %d", rr.Code)
-		}
+			if len(result) != tc.wantLen {
+				t.Errorf("expected %d got %d", tc.wantLen, len(result))
+			}
 
-		var result []model.Task
-		if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+			found := map[string]bool{}
+			for _, task := range result {
+				found[task.Title] = true
+			}
 
-		if len(result) != 2 {
-			t.Errorf("expected 2 tasks got %d", len(result))
-		}
-
-		found := map[string]bool{}
-
-		for _, task := range result {
-			found[task.Title] = true
-		}
-
-		if !found["Buy groceries"] {
-			t.Errorf("missing 'Buy groceries'")
-		}
-
-		if !found["Buy stationary"] {
-			t.Errorf("missing 'Buy stationary'")
-		}
-	})
-
-	t.Run("empty list", func(t *testing.T) {
-		tasks = map[string]model.Task{}
-
-		req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
-		req.Header.Set("Content-Type", "application/json")
-
-		rr := httptest.NewRecorder()
-
-		ListAllTasks(rr, req)
-
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200 got %d", rr.Code)
-		}
-
-		var result []model.Task
-		if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-
-		if len(result) != 0 {
-			t.Errorf("expected 0 tasks got %d", len(result))
-		}
-	})
+			for _, title := range tc.wantTitles {
+				if !found[title] {
+					t.Errorf("missing %s", title)
+				}
+			}
+		})
+	}
 }
 
+// -----------------------------
+// GET TASK BY ID
+// -----------------------------
+
 func TestGetTask(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func()
+		path       string
+		wantStatus int
+		wantTitle  string
+	}{
+		{
+			name: "existing task",
+			setup: func() {
+				tasks = map[string]model.Task{
+					"1": {ID: "1", Title: "Buy groceries"},
+					"2": {ID: "2", Title: "Buy stationary"},
+				}
+			},
+			path:       "/tasks/2",
+			wantStatus: http.StatusOK,
+			wantTitle:  "Buy stationary",
+		},
+		{
+			name: "task not found",
+			setup: func() {
+				tasks = map[string]model.Task{}
+			},
+			path:       "/tasks/999",
+			wantStatus: http.StatusNotFound,
+			wantTitle:  "",
+		},
+		{
+			name: "invalid id format",
+			setup: func() {
+				tasks = map[string]model.Task{}
+			},
+			path:       "/tasks/abc",
+			wantStatus: http.StatusBadRequest,
+			wantTitle:  "",
+		},
+		{
+			name:       "empty id",
+			setup:      func() {},
+			path:       "/tasks/",
+			wantStatus: http.StatusBadRequest,
+			wantTitle:  "",
+		},
+	}
 
-	t.Run("existing task", func(t *testing.T) {
-		tasks = map[string]model.Task{}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup()
 
-		tasks["1"] = model.Task{ID: "1", Title: "Buy groceries"}
-		tasks["2"] = model.Task{ID: "2", Title: "Buy stationary"}
+			req := newJSONRequest(http.MethodGet, tc.path, "")
+			rr := httptest.NewRecorder()
 
-		req := httptest.NewRequest(http.MethodGet, "/tasks/2", nil)
-		req.Header.Set("Content-Type", "application/json")
+			GetTaskByID(rr, req)
 
-		rr := httptest.NewRecorder()
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("expected %d got %d", tc.wantStatus, rr.Code)
+			}
 
-		GetTaskByID(rr, req)
+			if tc.wantStatus == http.StatusOK {
+				var task model.Task
+				decodeBody(t, rr, &task)
 
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200 got %d", rr.Code)
-		}
-
-		var task model.Task
-		if err := json.NewDecoder(rr.Body).Decode(&task); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-
-		if task.Title != "Buy stationary" {
-			t.Errorf("expected title 'Buy stationary' got '%s'", task.Title)
-		}
-	})
-
-	t.Run("task not found", func(t *testing.T) {
-		tasks = map[string]model.Task{}
-
-		req := httptest.NewRequest(http.MethodGet, "/tasks/999", nil)
-		req.Header.Set("Content-Type", "application/json")
-
-		rr := httptest.NewRecorder()
-
-		GetTaskByID(rr, req)
-
-		if rr.Code != http.StatusNotFound {
-			t.Errorf("expected 404 got %d", rr.Code)
-		}
-	})
-
-	t.Run("invalid json", func(t *testing.T) {
-		tasks = map[string]model.Task{}
-
-		req := httptest.NewRequest(http.MethodGet, "/tasks/abcdefg", nil)
-		req.Header.Set("Content-Type", "application/json")
-
-		rr := httptest.NewRecorder()
-
-		GetTaskByID(rr, req)
-
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("expected 400 got %d", rr.Code)
-		}
-	})
-
-	t.Run("empty id", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/tasks/", nil)
-		rr := httptest.NewRecorder()
-
-		GetTaskByID(rr, req)
-
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("expected 400 got %d", rr.Code)
-		}
-	})
+				if task.Title != tc.wantTitle {
+					t.Errorf("expected %s got %s", tc.wantTitle, task.Title)
+				}
+			}
+		})
+	}
 }

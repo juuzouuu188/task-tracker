@@ -13,18 +13,38 @@ import (
 
 var tasks = map[string]model.Task{}
 
-// HTTP POST
-func CreateTaskHandler(w http.ResponseWriter, r *http.Request) {
+// -----------------------------
+// Helpers (CONSISTENCY LAYER)
+// -----------------------------
 
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{
+		"error": msg,
+	})
+}
+
+// -----------------------------
+// CREATE TASK
+// -----------------------------
+
+func CreateTaskHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Title string `json:"title"`
 	}
 
-	json.NewDecoder(r.Body).Decode(&input)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
 
-	if input.Title == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
+	if strings.TrimSpace(input.Title) == "" {
+		writeError(w, http.StatusBadRequest, "title cannot be empty")
 		return
 	}
 
@@ -36,13 +56,13 @@ func CreateTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	tasks[task.ID] = task
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(task)
-
+	writeJSON(w, http.StatusCreated, task)
 }
 
-// HTTP GET
+// -----------------------------
+// LIST TASKS
+// -----------------------------
+
 func ListAllTasks(w http.ResponseWriter, r *http.Request) {
 	taskList := []model.Task{}
 
@@ -50,46 +70,40 @@ func ListAllTasks(w http.ResponseWriter, r *http.Request) {
 		taskList = append(taskList, task)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(taskList)
+	writeJSON(w, http.StatusOK, taskList)
 }
 
+// -----------------------------
+// GET TASK BY ID
+// -----------------------------
+
 func GetTaskByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/tasks/")
+	// safer path handling
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	id := strings.TrimPrefix(path, "/tasks/")
 
-	w.Header().Set("Content-Type", "application/json")
-
-	// empty ID
 	if id == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "missing task id",
-		})
+		writeError(w, http.StatusBadRequest, "missing task id")
 		return
 	}
 
-	//format check (numeric IDs only)
 	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "invalid task id format",
-		})
+		writeError(w, http.StatusBadRequest, "invalid task id format")
 		return
 	}
 
 	task, exists := tasks[id]
 	if !exists {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "task not found",
-		})
+		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(task)
+	writeJSON(w, http.StatusOK, task)
 }
+
+// -----------------------------
+// ID GENERATOR
+// -----------------------------
 
 func generateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())

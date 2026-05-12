@@ -101,6 +101,39 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, task)
 }
 
+func UpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
+
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	path = path[len("/tasks/"):]
+	id := path[:len(path)-len("/status")]
+
+	var input struct {
+		Status model.TaskStatus `json:"status"`
+	}
+	json.NewDecoder(r.Body).Decode(&input)
+
+	// validate status
+	if input.Status != model.StatusTodo &&
+		input.Status != model.StatusInProgress &&
+		input.Status != model.StatusDone {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	//check if it exists
+	task, exists := tasks[id]
+	if !exists {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	task.Status = input.Status
+	tasks[id] = task
+
+	writeJSON(w, http.StatusOK, task)
+}
+
 // -----------------------------
 // ID GENERATOR
 // -----------------------------

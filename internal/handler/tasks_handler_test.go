@@ -210,3 +210,66 @@ func TestGetTask(t *testing.T) {
 		})
 	}
 }
+
+// PATCH
+func TestUpdateTaskStats(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func()
+		path       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name: "Happy Path",
+			setup: func() {
+				tasks = map[string]model.Task{
+					"1": {ID: "1", Title: "Buy groceries", Status: model.StatusTodo},
+					"2": {ID: "2", Title: "Buy stationary", Status: model.StatusTodo},
+				}
+			},
+			path:       "/tasks/2/status",
+			body:       `{"status": "in_progress"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "Task not found",
+			setup: func() {
+				tasks = map[string]model.Task{
+					"1": {ID: "1", Title: "Buy groceries", Status: model.StatusTodo},
+					"2": {ID: "2", Title: "Buy stationary", Status: model.StatusTodo},
+				}
+			},
+			path:       "/tasks/5/status",
+			body:       `{"status": "in_progress"}`,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "Invalid Status",
+			setup: func() {
+				tasks = map[string]model.Task{
+					"1": {ID: "1", Title: "Buy groceries", Status: model.StatusTodo},
+					"2": {ID: "2", Title: "Buy stationary", Status: model.StatusTodo},
+				}
+			},
+			path:       "/tasks/1/status",
+			body:       `{"status": "in_unknown"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup()
+
+			req := newJSONRequest(http.MethodPatch, tc.path, tc.body)
+			rr := httptest.NewRecorder()
+
+			UpdateTaskStatus(rr, req)
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("expected %d got %d", tc.wantStatus, rr.Code)
+			}
+		})
+	}
+}
